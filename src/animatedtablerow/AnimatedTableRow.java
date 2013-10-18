@@ -2,13 +2,16 @@ package animatedtablerow ;
 
 import java.util.Arrays;
 
+import javafx.animation.Animation;
 import javafx.animation.TranslateTransition;
 import javafx.application.Application;
 import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.StringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
+import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Point2D;
 import javafx.scene.Node;
@@ -24,6 +27,7 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
@@ -31,15 +35,16 @@ import javafx.util.Callback;
 import javafx.util.Duration;
  
 public class AnimatedTableRow extends Application {
- 
    
-    public static void main(String[] args) {
+    private static final Duration ANIMATION_DURATION = Duration.seconds(0.4);
+
+	public static void main(String[] args) {
         launch(args);
     }
  
     @Override
     public void start(Stage stage) {
-        
+                
         stage.setTitle("Table View Sample");
         stage.setWidth(900);
         stage.setHeight(500);
@@ -78,42 +83,7 @@ public class AnimatedTableRow extends Application {
                     @Override
                     public void handle(MouseEvent event) {
                         if (event.getClickCount() == 2 && row.getItem() != null) {
-                            // Create imageview to display snapshot of row:
-                            final Image image = row.snapshot(null, null);
-                            final ImageView imageView = new ImageView(image);
-                            // Start animation at current row:
-                            final Point2D rowLocation = row.localToScene(new Point2D(0, 0));
-                            final double startX = rowLocation.getX();
-                            final double startY = rowLocation.getY();
-                            // End animation at first row (approximately: just do 30 px below top of table) 
-                            final Point2D toTableLocation = toTable.localToScene(new Point2D(0,0));
-                            final double endX = toTableLocation.getX();
-                            final double endY = toTableLocation.getY() + 30 ;
-                            // Manage image location ourselves (don't let layout manage it)
-                            imageView.setManaged(false);
-                            // Set start location
-                            imageView.relocate(startX, startY);
-                            // Create animation
-                            final TranslateTransition transition = new TranslateTransition(Duration.seconds(0.4), imageView);
-                            // At end of animation, actually move data, and remove animated image
-                            transition.setOnFinished(new EventHandler<ActionEvent>() {
-                                @Override
-                                public void handle(ActionEvent event) {
-                                    // Remove from first table
-                                    contactTable.getItems().remove(row.getItem());
-                                    // Add to first row of second table, looks better given the animation:
-                                    toTable.getItems().add(0, row.getItem());
-                                    // Remove animated image
-                                    root.getChildren().remove(imageView);
-                                }
-                            });
-                            // configure transition
-                            transition.setByX(endX - startX);
-                            transition.setByY(endY - startY);
-                            // add animated image to display
-                            root.getChildren().add(imageView);
-                            // start animation
-                            transition.play();
+                            moveDataWithAnimation(contactTable, toTable, root, row);
                         }
                     }
                 });
@@ -126,14 +96,14 @@ public class AnimatedTableRow extends Application {
     }
 
     private Node createTableContainer(final String labelText, final TableView<Person> table) {
-        final VBox contactContainer = new VBox();
-        contactContainer.setSpacing(5);
-        contactContainer.setPadding(new Insets(10, 0, 0, 10));
+        final VBox tableAndLabelContainer = new VBox();
+        tableAndLabelContainer.setSpacing(5);
+        tableAndLabelContainer.setPadding(new Insets(10, 0, 0, 10));
         final Label label = new Label(labelText);
         label.setFont(new Font("Arial", 20));
-        contactContainer.getChildren().addAll(label, table);
+        tableAndLabelContainer.getChildren().addAll(label, table);
         final HBox container = new HBox();
-        container.getChildren().add(contactContainer);
+        container.getChildren().add(tableAndLabelContainer);
         return container;
     }
     
@@ -143,28 +113,106 @@ public class AnimatedTableRow extends Application {
  
         TableColumn<Person, String> firstNameCol = new TableColumn<>("First Name");
         firstNameCol.setMinWidth(100);
-        firstNameCol.setCellValueFactory(
-                new PropertyValueFactory<Person, String>("firstName"));
+        firstNameCol.setCellValueFactory(new PropertyValueFactory<Person, String>("firstName"));
  
         TableColumn<Person, String> lastNameCol = new TableColumn<>("Last Name");
         lastNameCol.setMinWidth(100);
-        lastNameCol.setCellValueFactory(
-                new PropertyValueFactory<Person, String>("lastName"));
+        lastNameCol.setCellValueFactory(new PropertyValueFactory<Person, String>("lastName"));
  
         TableColumn<Person, String> emailCol = new TableColumn<>("Email");
         emailCol.setMinWidth(200);
-        emailCol.setCellValueFactory(
-                new PropertyValueFactory<Person, String>("email"));
+        emailCol.setCellValueFactory(new PropertyValueFactory<Person, String>("email"));
  
         table.getColumns().addAll(Arrays.asList(firstNameCol, lastNameCol, emailCol));
         return table;
     }
  
-    public static class Person {
+    private void moveDataWithAnimation(final TableView<Person> sourceTable,
+			final TableView<Person> destinationTable,
+			final Pane commonTableAncestor, final TableRow<Person> row) {
+		// Create imageview to display snapshot of row:
+		final ImageView imageView = createImageView(row);
+		// Start animation at current row:
+		final Point2D animationStartPoint = row.localToScene(new Point2D(0, 0)); // relative to Scene
+		final Point2D animationEndPoint = computeAnimationEndPoint(destinationTable); // relative to Scene
+		// Set start location
+		final Point2D startInRoot = commonTableAncestor.sceneToLocal(animationStartPoint); // relative to commonTableAncestor
+		imageView.relocate(startInRoot.getX(), startInRoot.getY()); 
+		// Create animation
+		final Animation transition = createAndConfigureAnimation(
+				sourceTable, destinationTable, commonTableAncestor, row,
+				imageView, animationStartPoint, animationEndPoint);
+		// add animated image to display
+		commonTableAncestor.getChildren().add(imageView);
+		// start animation
+		transition.play();
+	}
+
+	private TranslateTransition createAndConfigureAnimation(
+			final TableView<Person> sourceTable,
+			final TableView<Person> destinationTable,
+			final Pane commonTableAncestor, final TableRow<Person> row,
+			final ImageView imageView, final Point2D animationStartPoint,
+			Point2D animationEndPoint) {
+		final TranslateTransition transition = new TranslateTransition(ANIMATION_DURATION, imageView);
+		// At end of animation, actually move data, and remove animated image
+		transition.setOnFinished(createAnimationFinishedHandler(sourceTable, destinationTable, commonTableAncestor, row.getItem(), imageView));
+		// configure transition
+		transition.setByX(animationEndPoint.getX() - animationStartPoint.getX()); // absolute translation, computed from coords relative to Scene
+		transition.setByY(animationEndPoint.getY() - animationStartPoint.getY()); // absolute translation, computed from coords relative to Scene
+		return transition;
+	}
+
+	private EventHandler<ActionEvent> createAnimationFinishedHandler(
+			final TableView<Person> sourceTable,
+			final TableView<Person> destinationTable,
+			final Pane commonTableAncestor, final Person person,
+			final ImageView imageView) {
+		return new EventHandler<ActionEvent>() {
+		    @Override
+		    public void handle(ActionEvent event) {
+		        // Remove from first table
+				sourceTable.getItems().remove(person);
+		        // Add to first row of second table, looks better given the animation:
+		        destinationTable.getItems().add(0, person);
+		        destinationTable.getSelectionModel().select(person);
+		        destinationTable.scrollTo(0);
+		        destinationTable.requestFocus();
+		        // Remove animated image
+		        commonTableAncestor.getChildren().remove(imageView);
+		    }
+		};
+	}
+
+	// Animation end point (coordinates relative to scene)
+	private Point2D computeAnimationEndPoint(
+			final TableView<Person> destinationTable) {
+		// End animation at first row (bottom of table header) 
+		final Node toTableHeader = destinationTable.lookup(".column-header-background");
+		if (toTableHeader != null) {
+			final Bounds tableHeaderBounds = toTableHeader.localToScene(toTableHeader.getBoundsInLocal()); // relative to Scene
+			Point2D animationEndPoint = new Point2D(tableHeaderBounds.getMinX(), tableHeaderBounds.getMaxY());
+			return animationEndPoint;
+		} else { // fallback in case lookup fails for some reason
+		    // just approximate at 24 pixels below top of table:
+		    Point2D tableLocation = destinationTable.localToScene(new Point2D(0,0));
+		    return new Point2D(tableLocation.getX(), tableLocation.getY() + 24);
+		}
+	}
+
+	private ImageView createImageView(final TableRow<Person> row) {
+		final Image image = row.snapshot(null, null);
+		final ImageView imageView = new ImageView(image);
+        // Manage image location ourselves (don't let layout manage it)
+        imageView.setManaged(false);
+		return imageView;
+	}
+
+	public final static class Person {
  
-        private final SimpleStringProperty firstName;
-        private final SimpleStringProperty lastName;
-        private final SimpleStringProperty email;
+        private final StringProperty firstName;
+        private final StringProperty lastName;
+        private final StringProperty email;
  
         private Person(String fName, String lName, String email) {
             this.firstName = new SimpleStringProperty(fName);
@@ -179,6 +227,10 @@ public class AnimatedTableRow extends Application {
         public void setFirstName(String fName) {
             firstName.set(fName);
         }
+        
+        public StringProperty firstNameProperty() {
+            return firstName ;
+        }
  
         public String getLastName() {
             return lastName.get();
@@ -187,13 +239,21 @@ public class AnimatedTableRow extends Application {
         public void setLastName(String fName) {
             lastName.set(fName);
         }
- 
+
+        public StringProperty lastNameProperty() {
+            return lastName ;
+        }
+        
         public String getEmail() {
             return email.get();
         }
  
         public void setEmail(String fName) {
             email.set(fName);
+        }
+        
+        public StringProperty emailProperty() {
+            return email ;
         }
     }
 } 
